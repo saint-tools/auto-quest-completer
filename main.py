@@ -232,7 +232,18 @@ async def main():
             tag=str(client.user).split("#")[0][:12]
             log_ok(f"Logged in as {col}{client.user}{clr_reset}  {clr_dim}({client.user.id}){clr_reset}",tag,col)
             account_map[token]=(tag,col,client);ev.set()
-        asyncio.create_task(client.start(token));await ev.wait()
+        async def try_start():
+            try:
+                await client.start(token)
+            except discord.LoginFailure:
+                preview=token[:16]+"…"
+                log_err(f"Invalid token ({preview}) — removing from tokens.txt")
+                lines=[l.strip() for l in open(tokens_path,encoding="utf-8") if l.strip() and l.strip()!=token]
+                open(tokens_path,"w",encoding="utf-8").write("\n".join(lines)+("\n" if lines else ""))
+                ev.set()
+            except Exception as e:
+                log_err(f"Login error: {e}");ev.set()
+        asyncio.create_task(try_start());await ev.wait()
     await asyncio.gather(*[login(t,i) for i,t in enumerate(all_tokens)])
     print()
     await asyncio.gather(*[run_account(tok,tag,col) for tok,(tag,col,_) in account_map.items()])

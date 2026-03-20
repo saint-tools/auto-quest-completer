@@ -25,7 +25,7 @@ A fast and flexible **Discord quest automation script** with **multi-token suppo
 
 ```bash
 git clone https://github.com/saint-tools/auto-quest-completer.git
-cd your-repo
+cd auto-quest-completer
 pip install -r requirements.txt
 ```
 

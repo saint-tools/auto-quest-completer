@@ -1,1 +1,2 @@
 put your tokens here, 1 per line
+make sure the tokens are valid

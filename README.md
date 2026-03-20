@@ -9,8 +9,6 @@ A fast and flexible **Discord quest automation script** with **multi-token suppo
 * ⚡ **Mass Quest Completion** — Complete multiple discord quests at once
 * 🔑 **Multi-Token Support** — Run multiple accounts simultaneously
 * 🧠 **Lightweight & Fast** — Minimal overhead, maximum performance
-* 🛠️ **Simple Setup** — Get running in minutes
-* 🔄 **Scalable** — Easily expand with more tokens
 
 ---
 
@@ -33,7 +31,7 @@ pip install -r requirements.txt
 
 ## ⚙️ Configuration
 
-1. Add your Discord tokens to a file (e.g. `tokens.txt`):
+1. Add your Discord tokens to `tokens.txt`:
 
 ```txt
 token1

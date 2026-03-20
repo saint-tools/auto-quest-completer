@@ -86,7 +86,6 @@ This project is licensed under the MIT License.
 
 * Use responsibly
 * Avoid abusing rate limits
-* Consider using proxies if scaling heavily
 
 ---
 

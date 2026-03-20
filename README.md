@@ -60,6 +60,7 @@ python main.py
 ├── main.py
 ├── tokens.txt
 ├── requirements.txt
+├── config.json
 └── README.md
 ```
 

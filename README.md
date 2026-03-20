@@ -6,7 +6,7 @@ A fast and flexible **Discord quest automation script** with **multi-token suppo
 
 ## ✨ Features
 
-* ⚡ **Mass Quest Completion** — Automate repetitive quest tasks instantly
+* ⚡ **Mass Quest Completion** — Complete multiple discord quests at once
 * 🔑 **Multi-Token Support** — Run multiple accounts simultaneously
 * 🧠 **Lightweight & Fast** — Minimal overhead, maximum performance
 * 🛠️ **Simple Setup** — Get running in minutes

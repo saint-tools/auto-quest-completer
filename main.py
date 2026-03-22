@@ -1,5 +1,5 @@
 import asyncio,base64,json,os,random,sys,time
-from datetime import datetime
+from datetime import datetime, timezone
 import aiohttp,colorama,discord
 from colorama import Fore,Style
 
@@ -30,12 +30,12 @@ BANNER = (
 )
 
 def fmt_name(name):
-    return (name[:NAME_PAD-1]+"…") if len(name)>NAME_PAD else name.ljust(NAME_PAD)
+    return (name[:NAME_PAD-1]+"...") if len(name)>NAME_PAD else name.ljust(NAME_PAD)
 
 def fmt_bar(pct,width=20):
     filled=round(pct*width)
-    bar="".join(grad_bar[int(i/max(width-1,1)*(len(grad_bar)-1))]+"█" for i in range(filled))
-    return bar+clr_dim+"░"*(width-filled)+clr_reset
+    bar="".join(grad_bar[int(i/max(width-1,1)*(len(grad_bar)-1))]+"#" for i in range(filled))
+    return bar+clr_dim+"-"*(width-filled)+clr_reset
 
 def ts():
     return clr_dim+datetime.now().strftime("%H:%M:%S")+clr_reset
@@ -49,7 +49,7 @@ def log_info(msg,tag="",col=""):
 
 def log_ok(msg,tag="",col=""):
     p=f" {pfx(tag,col)}" if tag else ""
-    print(f"{ts()}{p} {clr_ok}  $  {clr_reset}{msg}")
+    print(f"{ts()}{p} {clr_ok}  +  {clr_reset}{msg}")
 
 def log_warn(msg,tag="",col=""):
     p=f" {pfx(tag,col)}" if tag else ""
@@ -57,7 +57,7 @@ def log_warn(msg,tag="",col=""):
 
 def log_err(msg,tag="",col=""):
     p=f" {pfx(tag,col)}" if tag else ""
-    print(f"{ts()}{p} {clr_err}  X  {clr_reset}{msg}")
+    print(f"{ts()}{p} {clr_err}  x  {clr_reset}{msg}")
 
 def log_video(name,cur,tgt,tag="",col=""):
     pct=min(cur/tgt,1.)if tgt else 1.
@@ -69,10 +69,9 @@ def log_beat(name,cur,tgt,task,tag="",col=""):
     pct=min(cur/tgt,1.)if tgt else 1.
     rem=max(0,tgt-cur)
     left=(str(int(rem//60))+"m").rjust(4) if rem>=60 else (str(int(rem))+"s").rjust(4)
-    icon=">" if "PLAY" in task else ">"
     cur_s=str(int(cur)).rjust(len(str(int(tgt))))
     p=f" {pfx(tag,col)}" if tag else ""
-    print(f"{ts()}{p} {grad_bar[4]}{icon}  {clr_reset}{fmt_name(name)}  {fmt_bar(pct)}  {clr_dim}{cur_s}/{int(tgt)}s  {left} left{clr_reset}")
+    print(f"{ts()}{p} {grad_bar[4]}>  {clr_reset}{fmt_name(name)}  {fmt_bar(pct)}  {clr_dim}{cur_s}/{int(tgt)}s  {left} left{clr_reset}")
 
 base_dir    = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(base_dir,"config.json")
@@ -93,7 +92,7 @@ def load_tokens():
 cfg           = load_config()
 all_tokens    = load_tokens()
 act_channel   = cfg.get("activity_channel_id")
-timezone      = cfg.get("timezone","America/New_York")
+timezone_str  = cfg.get("timezone","America/New_York")
 locale        = cfg.get("locale","en-US")
 
 desktop_ua    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Discord/1.0.0 Chrome/120.0.0.0 Electron/28.0.0 Safari/537.36"
@@ -111,7 +110,7 @@ def req_headers(token):
     return {
         "Authorization":token,"User-Agent":desktop_ua,
         "Content-Type":"application/json","X-Super-Properties":super_props,
-        "X-Discord-Locale":locale,"X-Discord-Timezone":timezone,
+        "X-Discord-Locale":locale,"X-Discord-Timezone":timezone_str,
     }
 
 async def http_get(sess,path,token):
@@ -130,6 +129,9 @@ async def http_post(sess,path,body,token):
 def parse_ts(s):
     return 0.0 if not s else datetime.fromisoformat(s.replace("Z","+00:00")).timestamp()
 
+def now_iso():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000000+00:00")
+
 def get_task(quest):
     tc=quest["config"].get("task_config")
     if not tc:return None,None
@@ -146,21 +148,30 @@ def get_progress(us,task):
     sp=us.get("stream_progress_seconds")
     return float(sp) if sp is not None else 0.0
 
-def active_quests(quest_list):
-    now=time.time();out=[]
+def split_quests(quest_list):
+    now=time.time();enrolled=[];unenrolled=[]
     for q in quest_list:
         us=user_status(q);exp=q["config"].get("expires_at","");tt,_=get_task(q)
-        if bool(us.get("enrolled_at")) and not bool(us.get("completed_at")) and not((parse_ts(exp)<=now)if exp else False) and tt:
-            out.append(q)
-    return out
+        if not tt:continue
+        if exp and parse_ts(exp)<=now:continue
+        if bool(us.get("completed_at")):continue
+        if bool(us.get("enrolled_at")):enrolled.append(q)
+        else:unenrolled.append(q)
+    return enrolled,unenrolled
 
 async def run_video(sess,quest,task,task_data,token,tag,col):
     qid=quest["id"];name=quest["config"]["messages"]["quest_name"]
     us=user_status(quest);target=float(task_data.get("target",0))
-    progress=get_progress(us,task);enrolled=parse_ts(us.get("enrolled_at",""))
+    progress=get_progress(us,task)
+    enrolled_ts=parse_ts(us.get("enrolled_at",""))
+    if enrolled_ts==0.0:enrolled_ts=time.time()
+    try:
+        await http_post(sess,f"/quests/{qid}/video-progress",{"timestamp":0},token)
+        await asyncio.sleep(1)
+    except:pass
     log_video(name,progress,target,tag,col);done=False
     while not done and progress<target:
-        if(time.time()-enrolled)+10-progress>=7:
+        if(time.time()-enrolled_ts)+10-progress>=7:
             nxt=min(target,progress+7+random.random())
             try:
                 resp=await http_post(sess,f"/quests/{qid}/video-progress",{"timestamp":nxt},token)
@@ -206,12 +217,23 @@ async def run_heartbeat(sess,quest,task,task_data,token,tag,col):
 
 async def run_account(token,tag,col):
     async with aiohttp.ClientSession() as sess:
-        log_info("Fetching quests…",tag,col)
+        log_info("Fetching quests...",tag,col)
         try:quests=(await http_get(sess,"/quests/@me",token)).get("quests",[])
         except Exception as e:log_err(f"Failed to fetch quests:{e}",tag,col);return
-        pending=active_quests(quests)
-        if not pending:log_warn("No eligible quests - accept them on discord.com/quest-home",tag,col);return
-        log_info(f"Running {clr_ok}{len(pending)}{clr_reset} quest(s) concurrently",tag,col)
+        enrolled,unenrolled=split_quests(quests)
+        if unenrolled:
+            log_info(f"Auto-enrolling {len(unenrolled)} quest(s)...",tag,col)
+            for q in unenrolled:
+                qname=q["config"]["messages"]["quest_name"]
+                try:
+                    us=await http_post(sess,f"/quests/{q['id']}/enroll",{"location":11},token)
+                    q["user_status"]=us if us else {"enrolled_at":now_iso(),"completed_at":None,"progress":{}}
+                    enrolled.append(q)
+                    log_ok(f"Enrolled: {qname}",tag,col)
+                except Exception as e:log_err(f"Could not enroll {qname}: {e}",tag,col)
+            await asyncio.sleep(1)
+        if not enrolled:log_warn("No eligible quests found",tag,col);return
+        log_info(f"Running {clr_ok}{len(enrolled)}{clr_reset} quest(s) concurrently",tag,col)
         async def handle(quest):
             task,task_data=get_task(quest);name=quest["config"]["messages"]["quest_name"]
             try:
@@ -220,7 +242,7 @@ async def run_account(token,tag,col):
                 elif task in("PLAY_ON_DESKTOP","STREAM_ON_DESKTOP","PLAY_ACTIVITY"):
                     await run_heartbeat(sess,quest,task,task_data,token,tag,col)
             except Exception as e:log_err(f"{name}:{e}",tag,col)
-        await asyncio.gather(*[handle(q) for q in pending])
+        await asyncio.gather(*[handle(q) for q in enrolled])
         log_ok("All quests finished!",tag,col)
 
 async def main():
@@ -236,8 +258,8 @@ async def main():
             try:
                 await client.start(token)
             except discord.LoginFailure:
-                preview=token[:16]+"…"
-                log_err(f"Invalid token ({preview}) - removing from tokens.txt")
+                preview=token[:16]+"..."
+                log_err(f"Invalid token ({preview}), removing from tokens.txt")
                 lines=[l.strip() for l in open(tokens_path,encoding="utf-8") if l.strip() and l.strip()!=token]
                 open(tokens_path,"w",encoding="utf-8").write("\n".join(lines)+("\n" if lines else ""))
                 ev.set()

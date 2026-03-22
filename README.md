@@ -90,6 +90,3 @@ This project is licensed under the MIT License.
 ## ⭐ Support
 
 If you find this useful, consider starring the repo.
-
-Discord server: https://discord.gg/qGxDxg77dt
-Telegram: https://t.me/pythonsaint

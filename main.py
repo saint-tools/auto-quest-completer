@@ -210,7 +210,7 @@ async def run_account(token,tag,col):
         try:quests=(await http_get(sess,"/quests/@me",token)).get("quests",[])
         except Exception as e:log_err(f"Failed to fetch quests:{e}",tag,col);return
         pending=active_quests(quests)
-        if not pending:log_warn("No eligible quests — accept them on discord.com/quest-home",tag,col);return
+        if not pending:log_warn("No eligible quests - accept them on discord.com/quest-home",tag,col);return
         log_info(f"Running {clr_ok}{len(pending)}{clr_reset} quest(s) concurrently",tag,col)
         async def handle(quest):
             task,task_data=get_task(quest);name=quest["config"]["messages"]["quest_name"]
@@ -237,7 +237,7 @@ async def main():
                 await client.start(token)
             except discord.LoginFailure:
                 preview=token[:16]+"…"
-                log_err(f"Invalid token ({preview}) — removing from tokens.txt")
+                log_err(f"Invalid token ({preview}) - removing from tokens.txt")
                 lines=[l.strip() for l in open(tokens_path,encoding="utf-8") if l.strip() and l.strip()!=token]
                 open(tokens_path,"w",encoding="utf-8").write("\n".join(lines)+("\n" if lines else ""))
                 ev.set()

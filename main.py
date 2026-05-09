@@ -91,19 +91,21 @@ def load_tokens():
 
 cfg           = load_config()
 all_tokens    = load_tokens()
-act_channel   = cfg.get("activity_channel_id")
 timezone_str  = cfg.get("timezone","America/New_York")
 locale        = cfg.get("locale","en-US")
 
-desktop_ua    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Discord/1.0.0 Chrome/120.0.0.0 Electron/28.0.0 Safari/537.36"
-api_base      = "https://discord.com/api/v9"
-task_priority = ["WATCH_VIDEO","PLAY_ON_DESKTOP","STREAM_ON_DESKTOP","PLAY_ACTIVITY","WATCH_VIDEO_ON_MOBILE"]
+desktop_ua      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Discord/1.0.9173 Chrome/132.0.6834.196 Electron/34.3.2 Safari/537.36"
+api_base        = "https://discord.com/api/v9"
+task_priority   = ["WATCH_VIDEO","WATCH_VIDEO_ON_MOBILE","PLAY_ON_DESKTOP","PLAY_ON_DESKTOP_V2","STREAM_ON_DESKTOP","PLAY_ACTIVITY"]
+heartbeat_tasks = {"PLAY_ON_DESKTOP","PLAY_ON_DESKTOP_V2","STREAM_ON_DESKTOP","PLAY_ACTIVITY"}
+video_tasks     = {"WATCH_VIDEO","WATCH_VIDEO_ON_MOBILE"}
+skip_tasks      = {"ACHIEVEMENT_IN_ACTIVITY","ACHIEVEMENT_IN_GAME","PLAY_ON_XBOX","PLAY_ON_PLAYSTATION","progress"}
 
 super_props = base64.b64encode(json.dumps({
     "os":"Windows","browser":"Discord Client","release_channel":"stable",
-    "client_build_number":512709,"os_version":"10.0.22631","os_arch":"x64",
+    "client_build_number":561532,"os_version":"10.0.22631","os_arch":"x64",
     "app_arch":"x64","system_locale":locale,"browser_user_agent":desktop_ua,
-    "browser_version":"28.0.0","client_event_source":None,
+    "browser_version":"34.3.2","client_event_source":None,
 },separators=(",",":")).encode()).decode()
 
 def req_headers(token):
@@ -133,10 +135,15 @@ def now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000000+00:00")
 
 def get_task(quest):
-    tc=quest["config"].get("task_config")
+    cfg_q=quest["config"]
+    tc=cfg_q.get("task_config_v2") or cfg_q.get("task_config")
     if not tc:return None,None
+    if tc.get("type")==2:return None,None
+    tasks=tc.get("tasks",{})
     for name in task_priority:
-        if tc.get("tasks",{}).get(name) is not None:return name,tc["tasks"][name]
+        if tasks.get(name) is not None:return name,tasks[name]
+    available=[k for k in tasks.keys() if k not in skip_tasks]
+    if available:return available[0],tasks[available[0]]
     return None,None
 
 def user_status(quest):
@@ -145,16 +152,16 @@ def user_status(quest):
 def get_progress(us,task):
     bt=(us.get("progress")or{}).get(task,{})
     if "value" in bt:return float(bt["value"])
-    sp=us.get("stream_progress_seconds")
-    return float(sp) if sp is not None else 0.0
+    return 0.0
 
 def split_quests(quest_list):
     now=time.time();enrolled=[];unenrolled=[]
     for q in quest_list:
         us=user_status(q);exp=q["config"].get("expires_at","");tt,_=get_task(q)
-        if not tt:continue
         if exp and parse_ts(exp)<=now:continue
+        if bool(us.get("claimed_at")):continue
         if bool(us.get("completed_at")):continue
+        if not tt:continue
         if bool(us.get("enrolled_at")):enrolled.append(q)
         else:unenrolled.append(q)
     return enrolled,unenrolled
@@ -174,40 +181,28 @@ async def run_video(sess,quest,task,task_data,token,tag,col):
         if(time.time()-enrolled_ts)+10-progress>=7:
             nxt=min(target,progress+7+random.random())
             try:
-                resp=await http_post(sess,f"/quests/{qid}/video-progress",{"timestamp":nxt},token)
+                resp=await http_post(sess,f"/quests/{qid}/video-progress",{"timestamp":int(nxt)},token)
                 progress=nxt;log_video(name,progress,target,tag,col)
                 tp=(resp.get("progress")or{}).get(task,{})
                 if tp.get("completed_at") is not None or progress>=target:done=True
             except Exception as e:log_err(f"{name}:{e}",tag,col)
         if not done:await asyncio.sleep(1)
     if not done:
-        try:await http_post(sess,f"/quests/{qid}/video-progress",{"timestamp":target},token)
+        try:await http_post(sess,f"/quests/{qid}/video-progress",{"timestamp":int(target)},token)
         except Exception as e:log_err(f"{name}:{e}",tag,col)
     log_ok(f"{name}  {clr_dim}video complete{clr_reset}",tag,col)
-
-async def find_stream_key(sess,qid,token):
-    if act_channel:return f"call:{act_channel}:1"
-    try:
-        dms=await http_get(sess,"/users/@me/channels",token)
-        if dms:return f"call:{dms[0]['id']}:1"
-    except:pass
-    try:
-        for g in await http_get(sess,"/users/@me/guilds",token):
-            chs=await http_get(sess,f"/guilds/{g['id']}/channels",token)
-            vc=next((c for c in chs if c.get("type")==2),None)
-            if vc:return f"call:{vc['id']}:1"
-    except:pass
-    return f"call:{qid}:1"
 
 async def run_heartbeat(sess,quest,task,task_data,token,tag,col):
     qid=quest["id"];name=quest["config"]["messages"]["quest_name"]
     us=user_status(quest);target=float(task_data.get("target",0))
-    progress=get_progress(us,task);skey=await find_stream_key(sess,qid,token)
+    progress=get_progress(us,task);skey=f"call:{qid}:1"
     log_beat(name,progress,target,task,tag,col)
     while True:
         try:
             resp=await http_post(sess,f"/quests/{qid}/heartbeat",{"stream_key":skey,"terminal":False},token)
-            progress=float((resp.get("progress")or{}).get(task,{}).get("value",0))
+            prog_map=(resp.get("progress")or{})
+            task_prog=prog_map.get(task,{})
+            progress=float(task_prog.get("value",progress))
             log_beat(name,progress,target,task,tag,col)
             if progress>=target:
                 await http_post(sess,f"/quests/{qid}/heartbeat",{"stream_key":skey,"terminal":True},token);break
@@ -218,16 +213,22 @@ async def run_heartbeat(sess,quest,task,task_data,token,tag,col):
 async def run_account(token,tag,col):
     async with aiohttp.ClientSession() as sess:
         log_info("Fetching quests...",tag,col)
-        try:quests=(await http_get(sess,"/quests/@me",token)).get("quests",[])
-        except Exception as e:log_err(f"Failed to fetch quests:{e}",tag,col);return
+        try:
+            resp=await http_get(sess,"/quests/@me",token)
+        except Exception as e:
+            log_err(f"Failed to fetch quests:{e}",tag,col);return
+        quests=resp.get("quests",[])
+        blocked_until=resp.get("quest_enrollment_blocked_until")
+        if blocked_until:
+            log_warn(f"Enrollment blocked until {blocked_until}",tag,col)
         enrolled,unenrolled=split_quests(quests)
-        if unenrolled:
+        if unenrolled and not blocked_until:
             log_info(f"Auto-enrolling {len(unenrolled)} quest(s)...",tag,col)
             for q in unenrolled:
                 qname=q["config"]["messages"]["quest_name"]
                 try:
                     us=await http_post(sess,f"/quests/{q['id']}/enroll",{"location":11},token)
-                    q["user_status"]=us if us else {"enrolled_at":now_iso(),"completed_at":None,"progress":{}}
+                    q["user_status"]=us if us else {"enrolled_at":now_iso(),"completed_at":None,"claimed_at":None,"progress":{}}
                     enrolled.append(q)
                     log_ok(f"Enrolled: {qname}",tag,col)
                 except Exception as e:log_err(f"Could not enroll {qname}: {e}",tag,col)
@@ -236,11 +237,17 @@ async def run_account(token,tag,col):
         log_info(f"Running {clr_ok}{len(enrolled)}{clr_reset} quest(s) concurrently",tag,col)
         async def handle(quest):
             task,task_data=get_task(quest);name=quest["config"]["messages"]["quest_name"]
+            if not task:
+                log_warn(f"No automatable task for: {name}",tag,col);return
             try:
-                if task in("WATCH_VIDEO","WATCH_VIDEO_ON_MOBILE"):
+                if task in video_tasks:
                     await run_video(sess,quest,task,task_data,token,tag,col)
-                elif task in("PLAY_ON_DESKTOP","STREAM_ON_DESKTOP","PLAY_ACTIVITY"):
+                elif task in heartbeat_tasks:
                     await run_heartbeat(sess,quest,task,task_data,token,tag,col)
+                elif task in skip_tasks:
+                    log_warn(f"Skipping server-validated task '{task}': {name}",tag,col)
+                else:
+                    log_warn(f"Unknown task type '{task}': {name}",tag,col)
             except Exception as e:log_err(f"{name}:{e}",tag,col)
         await asyncio.gather(*[handle(q) for q in enrolled])
         log_ok("All quests finished!",tag,col)
